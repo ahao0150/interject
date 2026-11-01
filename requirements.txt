@@ -1,0 +1,10 @@
+# Core
+torch>=2.1
+transformers>=4.44
+
+# Demo server
+fastapi>=0.110
+uvicorn>=0.29
+
+# Tests
+pytest>=8.0

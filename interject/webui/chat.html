@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>interject · 边生成边插话</title>
+<style>
+  :root{--bg:#0b0d11;--panel:#141821;--panel2:#10141b;--line:#232a36;--ink:#e9ecf3;--muted:#8891a5;
+        --accent:#4f8cff;--warn:#ffab2e;--ok:#35d39a;--danger:#ff5c6c;--ai:#6f7ce0}
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;
+       font:14px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+
+  header{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line);
+         background:var(--panel);flex:0 0 auto}
+  header h1{font-size:14px;margin:0;font-weight:600;letter-spacing:.3px}
+  header h1 span{font-weight:400;color:var(--muted);margin-left:7px;font-size:12px}
+  header .mname{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}
+  #status{font-size:12px;color:var(--muted);padding:2px 9px;border-radius:999px;background:#1b212c}
+  #status.busy{color:#1a1205;background:var(--warn);font-weight:600}
+  header .sp{flex:1}
+  select,button{background:#1b212c;color:var(--ink);border:1px solid var(--line);
+    border-radius:7px;padding:6px 10px;font:inherit;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  main{flex:1;display:grid;grid-template-columns:minmax(320px,38%) 1fr;min-height:0}
+  .col{display:flex;flex-direction:column;min-height:0}
+  .col.left{border-right:1px solid var(--line);background:var(--panel2)}
+  .colhead{flex:0 0 auto;padding:9px 16px;font-size:12px;color:var(--muted);
+           border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .colhead b{color:var(--ink);font-size:12px;font-weight:600}
+  .colhead .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .col.right .colhead .dot{background:var(--ai)}
+  .stream{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:9px}
+
+  /* ---------- 我的消息 ---------- */
+  .mine{max-width:100%;background:#1a2436;border:1px solid #2b3a55;border-radius:10px;
+        padding:9px 12px;align-self:stretch;position:relative}
+  .mine .mtag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+        padding:1px 8px;border-radius:999px;margin-bottom:5px}
+  .mine .mtag.msg{background:rgba(79,140,255,.18);color:#8fb6ff}
+  .mine .mtag.supp{background:rgba(255,171,46,.18);color:#ffc46b}
+  .mine .txt{white-space:pre-wrap;word-break:break-word}
+  .mine.supp{background:#2a2113;border-color:#5a431c}
+  .mine .state{margin-top:6px;font-size:11px;color:var(--muted)}
+  .mine .state.pending{color:var(--warn)}
+  .mine .state.taken{color:var(--ok)}
+  .mine .state.dropped{color:#ff8a95}
+  .mine .mhead{display:flex;align-items:center;gap:7px;margin-bottom:5px;flex-wrap:wrap}
+  .mine .mhead .mtag{margin-bottom:0}
+  .mine .mtime{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.2px}
+
+  /* 插话编号徽标：#1 #2 #3 —— 左右两侧同色同号，一眼对上 */
+  .sid{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;
+       padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:700;color:#0b0e14;
+       font-variant-numeric:tabular-nums}
+  .sid.c1{background:#6ea8ff} .sid.c2{background:#c58bff}
+  .sid.c3{background:#ffb347} .sid.c4{background:#5ad6a0} .sid.c5{background:#ff8a95}
+
+  /* ---------- AI 回复 ---------- */
+  .turn{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--ai);
+        border-radius:10px;padding:11px 14px}
+  .turn .thead{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:11px;color:var(--muted)}
+  .turn .thead b{color:#b3bcff;font-weight:600;font-size:11px}
+  .turn .tbody{white-space:pre-wrap;word-break:break-word}
+  .turn .tbody .seg{display:block;white-space:pre-wrap}
+  /* 右侧分段线：标出「这一段是受哪条插话影响」 */
+  .turn .tbmark{display:flex;align-items:center;gap:8px;margin:10px 0 9px;font-size:11px;color:#ffc46b}
+  .turn .tbmark .line{flex:1;height:1px;background:linear-gradient(90deg,rgba(255,171,46,.5),rgba(255,171,46,0))}
+  .turn .tbmark .lbl{white-space:nowrap;opacity:.92}
+  .turn .tfacts{margin-top:8px;padding-top:7px;border-top:1px dashed var(--line);
+        font-size:11px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}
+  .turn .tfacts b{color:var(--ink)}
+  .cursor::after{content:'▌';animation:blink 1s steps(1) infinite;color:var(--accent);margin-left:2px}
+  @keyframes blink{50%{opacity:0}}
+  .absorbed{margin-top:6px;font-size:11px;color:#ffc46b;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .chip{background:rgba(255,171,46,.14);border:1px solid rgba(255,171,46,.32);
+        border-radius:999px;padding:1px 9px;font-size:11px;color:#ffc46b}
+
+  /* ---------- 输入 ---------- */
+  .composer{flex:0 0 auto;border-top:1px solid var(--line);padding:10px 16px 14px;background:#0e1219}
+  .composer textarea{width:100%;background:#0a0d13;color:var(--ink);border:1px solid var(--line);
+        border-radius:9px;padding:10px 12px;font:inherit;resize:none;height:56px;max-height:140px}
+  .composer .row{display:flex;gap:9px;align-items:center;margin-top:8px}
+  .composer .hint{flex:1;font-size:11px;color:var(--muted);line-height:1.5}
+  .empty{color:var(--muted);font-size:12px;text-align:center;padding:30px 10px;line-height:1.9}
+</style>
+</head>
+<body>
+<header>
+  <h1>interject<span>· 边生成边插话</span></h1>
+  <span id="status">空闲</span>
+  <span class="sp"></span>
+  <span id="modelName" class="mname">Qwen2.5-1.5B-Instruct</span>
+  <select id="len" title="单次最多生成多少 token">
+    <option value="512">短 · 512</option>
+    <option value="1024" selected>中 · 1024</option>
+    <option value="2048">长 · 2048</option>
+  </select>
+  <button id="reset">清空</button>
+</header>
+
+<main>
+  <section class="col left">
+    <div class="colhead"><span class="dot"></span><b>我的这一侧</b><span>消息 / 插话</span></div>
+    <div class="stream" id="myCol">
+      <div class="empty">这里显示你说的话。<br>AI 正在回答时再发一条，就会标成「⚡ 插话」。</div>
+    </div>
+    <div class="composer">
+      <textarea id="input" placeholder="说点什么…（AI 输出时也能发，会当场插进去）"></textarea>
+      <div class="row">
+        <div class="hint" id="hint">Enter 发送 · Shift+Enter 换行</div>
+        <button class="primary" id="send">发送</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="col right">
+    <div class="colhead"><span class="dot"></span><b>AI 这一侧</b><span>回答 / 吸收了哪些插话</span></div>
+    <div class="stream" id="aiCol">
+      <div class="empty">AI 的回答会出现在这里。<br>插话被吸收时，会在回答下方标出「第 N 个 token」。</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let currentTurn = null;      // 当前正在流式更新的 AI 卡片
+let pendingSupps = [];       // 左栏里等待吸收的插话元素
+let busy = false;
+
+function scroll(el){ el.scrollTop = el.scrollHeight; }
+function clearEmpty(col){ const e = col.querySelector('.empty'); if (e) e.remove(); }
+
+const SID_CLASSES = ['c1','c2','c3','c4','c5'];
+const sidClass = id => SID_CLASSES[((Number(id) || 1) - 1) % SID_CLASSES.length];
+
+function sidBadge(id){
+  const b = document.createElement('span');
+  b.className = 'sid ' + sidClass(id);
+  b.textContent = '#' + (id != null ? id : '?');
+  return b;
+}
+
+function boundaryLabel(x){
+  if (x.boundary === 'comma') return `（逗号处，等了 ${x.waited_tokens} token）`;
+  if (x.boundary === 'forced') return '（等满补句号后插入）';
+  return '（句子边界）';
+}
+
+function fmtRel(rel){
+  return (typeof rel === 'number' && rel > 0) ? ` · 提交+${rel.toFixed(1)}s` : '';
+}
+
+function addMine(text, isSupp, meta){
+  clearEmpty($('myCol'));
+  const wrap = document.createElement('div');
+  wrap.className = 'mine' + (isSupp ? ' supp' : '');
+  const head = document.createElement('div'); head.className = 'mhead';
+  if (isSupp && meta && meta.id != null) head.appendChild(sidBadge(meta.id));
+  const tag = document.createElement('span');
+  tag.className = 'mtag ' + (isSupp ? 'supp' : 'msg');
+  tag.textContent = isSupp ? '⚡ 插话' : '消息';
+  head.appendChild(tag);
+  if (isSupp && meta && meta.submitted_wall){
+    const t = document.createElement('span'); t.className = 'mtime';
+    t.textContent = meta.submitted_wall + fmtRel(meta.submitted_rel);
+    t.title = `提交于 ${meta.submitted_wall}`;
+    head.appendChild(t);
+  }
+  const body = document.createElement('div');
+  body.className = 'txt';
+  body.textContent = text;
+  wrap.appendChild(head); wrap.appendChild(body);
+  wrap.dataset.suppText = text;
+  if (meta && meta.id != null) wrap.dataset.suppId = String(meta.id);
+  $('myCol').appendChild(wrap);
+  scroll($('myCol'));
+  return wrap;
+}
+
+function setState(el, text, cls){
+  let s = el.querySelector('.state');
+  if (!s) { s = document.createElement('div'); el.appendChild(s); }
+  s.className = 'state ' + (cls || '');
+  s.textContent = text;
+}
+
+function startTurn(){
+  clearEmpty($('aiCol'));
+  const card = document.createElement('div');
+  card.className = 'turn';
+  card.innerHTML = '<div class="thead"><b>AI</b><span class="phase">正在输出…</span></div>' +
+                   '<div class="tbody cursor"></div><div class="tfacts" style="display:none"></div>';
+  const tb = card.querySelector('.tbody');
+  const first = document.createElement('div'); first.className = 'seg';
+  tb.appendChild(first);
+  card._segs = [first];     // 每个 seg 对应一段输出
+  card._marks = [];         // [{chars,id,step,at,...}] 每段的分界点
+  $('aiCol').appendChild(card);
+  scroll($('aiCol'));
+  return card;
+}
+
+// 流式重绘：按插话分界把累计文本切进各段
+function paintTurn(card, fullText){
+  const segs = card._segs || [], marks = card._marks || [];
+  let cursor = 0;
+  for (let i = 0; i < marks.length; i++){
+    const end = Math.min(marks[i].chars || 0, fullText.length);
+    if (segs[i]) segs[i].textContent = fullText.slice(cursor, end);
+    cursor = end;
+  }
+  if (segs[segs.length - 1]) segs[segs.length - 1].textContent = fullText.slice(cursor);
+}
+
+function mkMark(supp){
+  const mark = document.createElement('div');
+  mark.className = 'tbmark';
+  const ids = (supp.ids && supp.ids.length) ? supp.ids : [supp.id];
+  ids.forEach(id => mark.appendChild(sidBadge(id)));
+  const lbl = document.createElement('span');
+  lbl.className = 'lbl';
+  const at = (typeof supp.at === 'number') ? ` · 输出到第 ${supp.step} token 时接入（+${supp.at.toFixed(2)}s）` : '';
+  lbl.textContent = (ids.length > 1 ? `这 ${ids.length} 条插话一起影响下面这段` : '这条插话影响下面这段') + at;
+  mark.appendChild(lbl);
+  const line = document.createElement('span'); line.className = 'line';
+  mark.appendChild(line);
+  return mark;
+}
+
+// 追加一个分界点：右侧插入分隔条 + 开新段
+function addMark(card, supp){
+  if (!card) return;
+  card._marks.push(supp);
+  const tb = card.querySelector('.tbody');
+  tb.appendChild(mkMark(supp));
+  const seg = document.createElement('div'); seg.className = 'seg';
+  tb.appendChild(seg);
+  const prev = card._segs[card._segs.length - 1];
+  if (prev) prev.classList.remove('cur');
+  card._segs.push(seg);
+}
+
+// 用服务端权威分段重绘整条回复（结束时校正一次，避免流式累积误差）
+function renderSegments(card, segments){
+  const tb = card.querySelector('.tbody');
+  tb.innerHTML = '';
+  card._segs = []; card._marks = [];
+  const first = document.createElement('div'); first.className = 'seg';
+  tb.appendChild(first); card._segs.push(first);
+  (segments || []).forEach(s => {
+    if (s && s.supp){
+      tb.appendChild(mkMark(s.supp));
+      card._marks.push(s.supp);
+      const seg = document.createElement('div'); seg.className = 'seg';
+      tb.appendChild(seg); card._segs.push(seg);
+    } else {
+      const seg = card._segs[card._segs.length - 1];
+      seg.textContent = (seg.textContent || '') + (s && s.text ? s.text : '');
+    }
+  });
+}
+
+function setBusy(v){
+  busy = v;
+  $('status').textContent = v ? 'AI 输出中 · 可插话' : '空闲';
+  $('status').className = v ? 'busy' : '';
+  $('send').textContent = v ? '插入' : '发送';
+  $('hint').textContent = v ? 'AI 正在输出，现在发的会当场插进去' : 'Enter 发送 · Shift+Enter 换行';
+}
+
+function renderHistory(history){
+  $('myCol').innerHTML = '';
+  $('aiCol').innerHTML = '';
+  history.forEach(m => {
+    if (m.role === 'user') {
+      addMine(m.content, false);
+      return;
+    }
+    clearEmpty($('aiCol'));
+    const card = document.createElement('div');
+    card.className = 'turn';
+    card.innerHTML = '<div class="thead"><b>AI</b><span>已完成</span></div>';
+    const tb = document.createElement('div'); tb.className = 'tbody';
+    card.appendChild(tb);
+    card._segs = []; card._marks = [];
+
+    if (m.segments && m.segments.length) {
+      renderSegments(card, m.segments);
+    } else {
+      // 旧记录没有分段信息：退回解析（用户补充：…）
+      const seg = document.createElement('div'); seg.className = 'seg';
+      let cleaned = String(m.content || '').replace(/（用户补充：([^）]*)）/g, '');
+      cleaned = cleaned.replace(/\[用户补充\][^\n]*\n?/g, '');
+      seg.textContent = cleaned.trim();
+      tb.appendChild(seg);
+      card._segs.push(seg);
+    }
+    $('aiCol').appendChild(card);
+
+    // 左栏补上这一轮的插话：编号 + 提交时间 + 接入位置，与右侧分隔条同号同色
+    (card._marks || []).forEach(s => {
+      const items = (s.items && s.items.length ? s.items
+        : [{id: s.id, text: s.text, submitted_wall: s.submitted_wall, submitted_rel: s.submitted_rel}]);
+      items.forEach(it => {
+        const el = addMine(it.text, true, it);
+        const rel = (typeof s.at === 'number') ? ` · 接入+${s.at.toFixed(2)}s` : '';
+        setState(el, `已在第 ${s.step} 个 token 处插入`
+          + boundaryLabel(s)
+          + (items.length > 1 ? ` · 与另 ${items.length - 1} 条同批` : '') + rel, 'taken');
+      });
+    });
+    scroll($('aiCol'));
+  });
+  scroll($('myCol')); scroll($('aiCol'));
+}
+
+function connect(){
+  const es = new EventSource('/api/chat/stream');
+  es.onmessage = ev => { let e; try { e = JSON.parse(ev.data); } catch { return; } handle(e); };
+  es.onerror = () => { $('status').textContent = '连接断开，重连中…'; };
+}
+
+function handle(e){
+  switch (e.type) {
+    case 'hello':
+      renderHistory(e.history || []);
+      setBusy(!!e.busy);
+      break;
+
+    case 'user':
+      addMine(e.text, false);
+      break;
+
+    case 'queued': {
+      const el = addMine(e.text, true, e);
+      setState(el, `已投递 ${e.submitted_wall || ''} · 等待 AI 接到`, 'pending');
+      pendingSupps.push(el);
+      break;
+    }
+
+    case 'supplement_held': {
+      // 已到达但模型还在写句子，等句号再插（避免把句子切断）
+      const el = pendingSupps.find(x => String(x.dataset.suppId) === String(e.id)) || pendingSupps[0];
+      if (el) setState(el, '已投递 · 等 AI 写完这句再插', 'pending');
+      break;
+    }
+
+    case 'supplement_taken': {
+      // 同句界可能一次插进多条，逐条按编号回填状态
+      const ids = (e.ids && e.ids.length) ? e.ids : [e.id];
+      const rel = (typeof e.at === 'number') ? ` · 接入+${e.at.toFixed(2)}s` : '';
+      ids.forEach(id => {
+        const idx = pendingSupps.findIndex(x => String(x.dataset.suppId) === String(id));
+        const el = idx >= 0 ? pendingSupps.splice(idx, 1)[0] : null;
+        if (el) setState(el, `已在第 ${e.step} 个 token 处插入`
+          + boundaryLabel(e) + rel, 'taken');
+      });
+      addMark(currentTurn, e);
+      if (currentTurn) scroll($('aiCol'));
+      break;
+    }
+
+    case 'supplement_dropped': {
+      const idx = pendingSupps.findIndex(x => String(x.dataset.suppId) === String(e.id));
+      const el = idx >= 0 ? pendingSupps.splice(idx, 1)[0] : pendingSupps.shift();
+      if (el) setState(el, '本轮未插入 · 生成已结束', 'dropped');
+      break;
+    }
+
+    case 'assistant_start':
+      currentTurn = startTurn();
+      setBusy(true);
+      break;
+
+    case 'token':
+      if (currentTurn) {
+        paintTurn(currentTurn, e.text);
+        scroll($('aiCol'));
+      }
+      break;
+
+    case 'assistant_done': {
+      if (currentTurn) {
+        const tb = currentTurn.querySelector('.tbody');
+        tb.classList.remove('cursor');
+        // 用服务端权威分段校正一次流式累积
+        if (e.segments && e.segments.length) renderSegments(currentTurn, e.segments);
+        else paintTurn(currentTurn, e.text);
+        currentTurn.querySelector('.phase').textContent = e.truncated ? '已截断' : '已完成';
+        if (e.truncated) {
+          const warn = document.createElement('div');
+          warn.className = 'absorbed';
+          const chip = document.createElement('span');
+          chip.className = 'chip';
+          chip.style.cssText = 'background:rgba(255,92,108,.14);border-color:rgba(255,92,108,.35);color:#ff8a95';
+          chip.textContent = `⚠ 达到长度上限 ${e.max_new_tokens} token，输出被截断`;
+          warn.appendChild(chip);
+          tb.parentElement.insertBefore(warn, tb.nextSibling);
+        }
+        const f = currentTurn.querySelector('.tfacts');
+        f.style.display = 'flex';
+        f.innerHTML = `<span><b>${e.n_new_tokens}</b> token</span>` +
+                      `<span><b>${e.wall_seconds}</b> 秒</span>` +
+                      `<span><b>${e.tokens_per_second}</b> tok/s</span>` +
+                      `<span>吸收插话 <b>${(e.supplements||[]).length}</b> 条</span>`;
+        currentTurn = null;
+      }
+      break;
+    }
+
+    case 'idle':
+      setBusy(false);
+      break;
+
+    case 'reset':
+      pendingSupps = []; currentTurn = null;
+      $('myCol').innerHTML = '<div class="empty">这里显示你说的话。<br>AI 正在回答时再发一条，就会标成「⚡ 插话」。</div>';
+      $('aiCol').innerHTML = '<div class="empty">AI 的回答会出现在这里。<br>插话被吸收时，会在回答下方标出「第 N 个 token」。</div>';
+      break;
+
+    case 'notice':
+      $('status').textContent = e.text;
+      break;
+
+    case 'error':
+      $('status').textContent = '出错：' + e.message;
+      break;
+  }
+}
+
+async function send(){
+  const text = $('input').value.trim();
+  if (!text) return;
+  $('input').value = '';
+  await fetch('/api/chat/send', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ text, max_tokens: parseInt($('len').value, 10) }),
+  });
+}
+
+$('send').onclick = send;
+$('input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$('reset').onclick = () => fetch('/api/chat/reset', {method:'POST'});
+
+connect();
+</script>
+</body>
+</html>

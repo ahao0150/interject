@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Model weights are never committed
+models/
+*.safetensors
+*.bin
+*.gguf
+
+# Runtime artifacts
+logs/
+*.jsonl
+!assets/**/*.jsonl
+
+# Scratch
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+.pytest_cache/
